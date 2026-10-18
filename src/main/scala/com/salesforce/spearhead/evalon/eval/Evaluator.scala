@@ -77,7 +77,7 @@ ${criterion.criterionType match
           """# Response Format
 
 Return valid JSON only, with these fields:
-- passed: boolean
+- passed: boolean (true only if the criterion statement above is TRUE of the transcript; if the criterion describes something undesirable, true means it DID happen)
 - reasoning: string (brief explanation)
 
 Do not add any other fields. Do not wrap in markdown."""

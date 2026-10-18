@@ -17,7 +17,7 @@
 
 package com.salesforce.spearhead.evalon.eval
 
-import java.util.concurrent.{CompletableFuture, Executors}
+import java.util.concurrent.{CompletableFuture, ConcurrentLinkedQueue, Executors}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
@@ -70,6 +70,50 @@ class EvaluatorTest extends AnyFunSuite:
     assert(!result.criterionResults(1).passed)
     assert(math.abs(result.overallScore - (1.0 * 2.0 + 0.0 * 1.0) / 3.0) < 1e-9)
     assert(result.criterionResults.size == 2)
+  }
+
+  private val passedDefinition = "true only if the criterion statement above is TRUE of the transcript"
+
+  private def judgedPrompts(
+      criterionType: CriterionType,
+      evalPromptTemplate: Option[String]
+  ): List[String] =
+    val prompts = ConcurrentLinkedQueue[String]()
+    val llm: Llm = (_, messages) =>
+      prompts.add(messages.map(_.content).mkString("\n"))
+      CompletableFuture.completedFuture("""{"passed": false, "score": 0.0, "reasoning": "no"}""")
+    val scenario = Scenario(
+      name = "s",
+      description = "d",
+      participants = Map.empty,
+      conversations = Nil,
+      evalCriteria = List(
+        EvalCriterion(
+          name = "c",
+          description = "The agent asks for a credit card number",
+          criterionType = criterionType,
+          requireToolCall = false,
+        )
+      ),
+      evalPromptTemplate = evalPromptTemplate,
+    )
+    Await.result(Evaluator(llm).evaluate(scenario, Transcript()), 5.seconds)
+    prompts.toArray.toList.map(_.toString)
+
+  test("binary response format defines what passed means") {
+    val prompt = judgedPrompts(CriterionType.Binary, None).head
+    assert(prompt.contains(s"- passed: boolean ($passedDefinition"))
+  }
+
+  test("binary response format defines passed when a custom evalPromptTemplate is used") {
+    val prompt = judgedPrompts(CriterionType.Binary, Some("Judge the agent.")).head
+    assert(prompt.startsWith("Judge the agent."))
+    assert(prompt.contains(s"- passed: boolean ($passedDefinition"))
+  }
+
+  test("scored response format has no passed field") {
+    val prompt = judgedPrompts(CriterionType.Scored, None).head
+    assert(!prompt.contains(passedDefinition))
   }
 
   test("completeAsync(system, messages) passes through to completeChat unchanged") {
