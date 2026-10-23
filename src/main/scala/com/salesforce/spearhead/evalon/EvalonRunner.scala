@@ -32,7 +32,7 @@ import com.salesforce.spearhead.evalon.agent.{Agent, SimpleAgent}
 import com.salesforce.spearhead.evalon.eval.Evaluator
 import com.salesforce.spearhead.evalon.llm.Llm
 import com.salesforce.spearhead.evalon.model.{ParticipantType, Scenario}
-import com.salesforce.spearhead.evalon.scenario.ScenarioLoader
+import com.salesforce.spearhead.evalon.scenario.{ScenarioLoader, ScenarioValidator}
 
 /** Blocking Java-callable runner: simulate a scenario and judge.
   *
@@ -55,6 +55,8 @@ final class EvalonRunner(system: ActorSystem[SpawnProtocol.Command]):
     run(scenario, agentImpl, llm, options)
 
   def run(scenario: Scenario, agent: Agent, llm: Llm, options: EvalonRunOptions): EvalonResult =
+    val problems = ScenarioValidator.validate(scenario)
+    if problems.nonEmpty then throw InvalidScenarioException(problems)
     val ec = options.executionContext
     val timeout = Timeout(options.getSimulationTimeout.toScala)
     val runName = s"run-${runSeq.incrementAndGet()}"

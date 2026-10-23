@@ -225,8 +225,24 @@ eval_criteria:
     criterion_type: scored
     require_tool_call: false
     pass_threshold: 0.7             # scored/rubric: passed if score >= this
+  - name: policy_clarity
+    description: |
+      How clearly did the agent explain the refund policy?
+      Levels (pick exactly one):
+      - absent (0.0): did not explain the policy
+      - generic (0.5): correct but generic explanation
+      - clear (0.75): clear, plain-language explanation
+      - clear-with-example (1.0): clear, with a concrete example
+    criterion_type: rubric
+    require_tool_call: false
+    pass_threshold: 0.75            # required for rubric; "clear" or better passes
 ```
 
 A criterion may also be a plain string; that is treated as a binary check with `require_tool_call: false`.
 
-Judge JSON is per criterion: binary returns `{passed, reasoning}`; scored and rubric return `{score, reasoning}`. Binary `passed` comes from the judge; scored/rubric `passed` is `score >= pass_threshold` when that field is set.
+Judge JSON is per criterion: binary returns `{passed, reasoning}`; scored and rubric return `{score, reasoning}`. Binary `passed` comes from the judge; scored `passed` is `score >= pass_threshold` when that field is set; rubric `passed` is always `score >= pass_threshold`.
+
+A rubric's levels are written in its `description`, each with a name and a score on 0 to 1 (the same scale as `pass_threshold`). Scores on another scale, such as 1 to 5, are not converted and give wrong results. The judge picks exactly one level and returns that level's score as written. Only if the levels have no scores does the judge choose a score from 0 to 1 itself. For a rubric:
+
+- `pass_threshold` (0 to 1) and a non-blank `description` are required. Otherwise a YAML scenario fails to load (`ScenarioLoader.load` returns a `Left`), and a `Scenario` built in code is rejected by `EvalonRunner.run` with `InvalidScenarioException` before the simulation starts.
+- The score must be a number from 0 to 1. Anything else fails the criterion with score 0 and a reason starting `Invalid judge response`.
