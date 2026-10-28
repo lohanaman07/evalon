@@ -41,20 +41,10 @@ class ScenarioValidatorTest extends AnyFunSuite:
   ): EvalCriterion =
     EvalCriterion(name, description, CriterionType.Rubric, requireToolCall = false, passThreshold)
 
-  test("a rubric with a threshold and a description is valid") {
-    assert(ScenarioValidator.validate(scenarioWith(rubric())).isEmpty)
-  }
-
-  test("rubric thresholds of exactly 0 and 1 are valid") {
-    assert(ScenarioValidator.validate(scenarioWith(rubric(passThreshold = Some(0.0)))).isEmpty)
-    assert(ScenarioValidator.validate(scenarioWith(rubric(passThreshold = Some(1.0)))).isEmpty)
-  }
-
-  test("a rubric without a valid threshold is rejected") {
-    List(None, Some(1.5), Some(-0.1), Some(Double.NaN)).foreach { threshold =>
+  test("a rubric with a description is valid whatever its threshold") {
+    List(Some(0.75), Some(0.0), Some(3.0), Some(-1.0), None).foreach { threshold =>
       val problems = ScenarioValidator.validate(scenarioWith(rubric(passThreshold = threshold)))
-      val expected = "Criterion 'clarity' is a rubric and needs a passThreshold between 0 and 1"
-      assert(problems == List(expected), threshold)
+      assert(problems.isEmpty, threshold)
     }
   }
 
@@ -67,8 +57,8 @@ class ScenarioValidatorTest extends AnyFunSuite:
   test("a rubric with a blank name is labelled by its position") {
     val valid = rubric(name = "first")
     val problems =
-      ScenarioValidator.validate(scenarioWith(valid, rubric(name = " ", passThreshold = None)))
-    assert(problems == List("Criterion '#2' is a rubric and needs a passThreshold between 0 and 1"))
+      ScenarioValidator.validate(scenarioWith(valid, rubric(name = " ", description = "")))
+    assert(problems == List("Criterion '#2' is a rubric and needs a description with its levels"))
   }
 
   test("binary and scored criteria are not validated") {
@@ -80,23 +70,23 @@ class ScenarioValidatorTest extends AnyFunSuite:
     assert(ScenarioValidator.validate(scenario).isEmpty)
   }
 
-  test("ScenarioLoader rejects a YAML rubric without pass_threshold") {
+  test("ScenarioLoader rejects a YAML rubric without a description") {
     val yaml =
       """name: rubric-scenario
         |description: d
         |eval_criteria:
         |  - name: clarity
-        |    description: "Levels: generic (0.5), clear (0.75)"
         |    criterion_type: rubric
+        |    pass_threshold: 0.75
         |""".stripMargin
     val path = Files.createTempFile("rubric-scenario", ".yaml")
     try
       Files.writeString(path, yaml)
       assert(
         ScenarioLoader.load(path) ==
-          Left("Criterion 'clarity' is a rubric and needs a passThreshold between 0 and 1")
+          Left("Criterion 'clarity' is a rubric and needs a description with its levels")
       )
-      Files.writeString(path, yaml + "    pass_threshold: 0.75\n")
+      Files.writeString(path, yaml + "    description: \"Levels: generic (0.5), clear (0.75)\"\n")
       assert(ScenarioLoader.load(path).isRight)
     finally Files.deleteIfExists(path)
   }

@@ -292,7 +292,7 @@ class EvalonRunnerTest extends AnyFunSuite with BeforeAndAfterAll:
       CompletableFuture.completedFuture(AgentReply.end())
     val invalid = scenario("invalid-rubric").copy(
       evalCriteria = List(
-        EvalCriterion("clarity", "Levels: ...", CriterionType.Rubric, requireToolCall = false)
+        EvalCriterion("clarity", " ", CriterionType.Rubric, requireToolCall = false, Some(0.75))
       )
     )
 
@@ -300,7 +300,7 @@ class EvalonRunnerTest extends AnyFunSuite with BeforeAndAfterAll:
       evalon.runSimple(invalid, agent, llm, failFastOptions)
     }
     assert(
-      ex.getMessage == "Criterion 'clarity' is a rubric and needs a passThreshold between 0 and 1"
+      ex.getMessage == "Criterion 'clarity' is a rubric and needs a description with its levels"
     )
     assert(calls.get == 0)
   }

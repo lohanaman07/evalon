@@ -23,23 +23,15 @@ object ScenarioValidator:
 
   /** Human-readable problems with the scenario's criteria; empty when the scenario is valid.
     *
-    * Only rubric criteria are checked: their levels live in the description and they pass by
-    * threshold, so both must be present.
+    * Only rubric criteria are checked: their levels live in the description, so it must be present.
     */
   def validate(scenario: Scenario): List[String] =
     scenario.evalCriteria.zipWithIndex.flatMap { (criterion, index) =>
       if criterion.criterionType != CriterionType.Rubric then Nil
       else
         val label = Option(criterion.name).filter(_.trim.nonEmpty).getOrElse(s"#${index + 1}")
-        // Written so NaN fails: every comparison with NaN is false.
-        val validThreshold = criterion.passThreshold.exists(t => t >= 0.0 && t <= 1.0)
         val hasDescription = Option(criterion.description).exists(_.trim.nonEmpty)
-        List(
-          Option.unless(validThreshold)(
-            s"Criterion '$label' is a rubric and needs a passThreshold between 0 and 1"
-          ),
-          Option.unless(hasDescription)(
-            s"Criterion '$label' is a rubric and needs a description with its levels"
-          ),
-        ).flatten
+        Option.unless(hasDescription)(
+          s"Criterion '$label' is a rubric and needs a description with its levels"
+        ).toList
     }

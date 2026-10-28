@@ -235,14 +235,16 @@ eval_criteria:
       - clear-with-example (1.0): clear, with a concrete example
     criterion_type: rubric
     require_tool_call: false
-    pass_threshold: 0.75            # required for rubric; "clear" or better passes
+    pass_threshold: 0.75            # "clear" or better passes
 ```
 
 A criterion may also be a plain string; that is treated as a binary check with `require_tool_call: false`.
 
-Judge JSON is per criterion: binary returns `{passed, reasoning}`; scored and rubric return `{score, reasoning}`. Binary `passed` comes from the judge; scored `passed` is `score >= pass_threshold` when that field is set; rubric `passed` is always `score >= pass_threshold`.
+Judge JSON is per criterion: binary returns `{passed, reasoning}`; scored and rubric return `{score, reasoning}`. Binary `passed` comes from the judge; scored `passed` is `score >= pass_threshold` when that field is set; rubric rules are below.
 
-A rubric's levels are written in its `description`, each with a name and a score on 0 to 1 (the same scale as `pass_threshold`). Scores on another scale, such as 1 to 5, are not converted and give wrong results. The judge picks exactly one level and returns that level's score as written. Only if the levels have no scores does the judge choose a score from 0 to 1 itself. For a rubric:
+A rubric's levels are written in its `description`, each with a name and a score. Scores can use any scale, such as 0 to 1 or 1 to 5, as long as `pass_threshold` uses the same one. The judge picks exactly one level and returns that level's score as written. Only if the levels have no scores does the judge choose a score from 0 to 1 itself, so set `pass_threshold` on that scale. For a rubric:
 
-- `pass_threshold` (0 to 1) and a non-blank `description` are required. Otherwise a YAML scenario fails to load (`ScenarioLoader.load` returns a `Left`), and a `Scenario` built in code is rejected by `EvalonRunner.run` with `InvalidScenarioException` before the simulation starts.
-- The score must be a number from 0 to 1. Anything else fails the criterion with score 0 and a reason starting `Invalid judge response`.
+- A non-blank `description` is required. Otherwise a YAML scenario fails to load (`ScenarioLoader.load` returns a `Left`), and a `Scenario` built in code is rejected by `EvalonRunner.run` with `InvalidScenarioException` before the simulation starts.
+- A rubric without `pass_threshold` fails after evaluation with a reason starting `Rubric criterion has no passThreshold`, unless it already failed for a missing tool call.
+- With `require_tool_call: true`, the judge must also return `passed: true`. Without it the criterion fails whatever the score and threshold.
+- The score must be a number. Anything else fails the criterion with score 0 and a reason starting `Invalid judge response`, unless it already failed for a missing tool call.

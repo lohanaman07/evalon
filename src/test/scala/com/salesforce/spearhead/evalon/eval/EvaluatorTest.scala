@@ -275,20 +275,27 @@ class EvaluatorTest extends AnyFunSuite:
     assert(r.score == 0.75)
   }
 
-  test("rubric rejects a missing, null, non-numeric, infinite or out-of-range score") {
+  test("rubric compares scores and threshold on the caller's scale") {
+    val r = rubricResult("""{"score":4,"reasoning":"Clear."}""", Some(3.0))
+    assert(r.passed)
+    assert(r.score == 4.0)
+    assert(!rubricResult("""{"score":2,"reasoning":"Vague."}""", Some(3.0)).passed)
+    assert(rubricResult("""{"score":-1,"reasoning":"r"}""", Some(-2.0)).passed)
+  }
+
+  test("rubric rejects a missing, null, non-numeric or infinite score") {
     val replies = List(
       """{"reasoning":"r"}""",
       """{"score":null,"reasoning":"r"}""",
       """{"score":"high","reasoning":"r"}""",
       """{"score":1e400,"reasoning":"r"}""",
-      """{"score":1.3,"reasoning":"r"}""",
-      """{"score":-0.1,"reasoning":"r"}""",
+      """{"score":-1e400,"reasoning":"r"}""",
     )
     replies.foreach { reply =>
-      val r = rubricResult(reply, Some(0.0))
+      val r = rubricResult(reply, Some(-10.0))
       assert(!r.passed, reply)
       assert(r.score == 0.0, reply)
-      assert(r.reasoning == "Invalid judge response: score missing or outside 0 to 1. r", reply)
+      assert(r.reasoning == "Invalid judge response: score missing or not a number. r", reply)
     }
   }
 
@@ -297,19 +304,51 @@ class EvaluatorTest extends AnyFunSuite:
     assert(!r.passed)
     assert(
       r.reasoning ==
-        "Invalid judge response: score missing or outside 0 to 1. I think the agent was clear."
+        "Invalid judge response: score missing or not a number. I think the agent was clear."
     )
   }
 
   test("rubric reports only the first 200 characters of a long non-JSON reply") {
     val r = rubricResult("x" * 300)
     assert(!r.passed)
-    assert(r.reasoning == s"Invalid judge response: score missing or outside 0 to 1. ${"x" * 200}")
+    assert(r.reasoning == s"Invalid judge response: score missing or not a number. ${"x" * 200}")
   }
 
-  test("rubric ignores the judge's passed field") {
+  test("rubric without a required tool call ignores the judge's passed field") {
     assert(!rubricResult("""{"passed":true,"score":0.5,"reasoning":"r"}""").passed)
     assert(rubricResult("""{"passed":false,"score":0.75,"reasoning":"r"}""").passed)
+  }
+
+  private def toolCallRubricResult(reply: String, passThreshold: Option[Double] = Some(0.75)) =
+    judgeOnce(rubricCriterion(passThreshold, requireToolCall = true), reply)._1
+
+  test("rubric requiring a tool call fails unless passed is true, at any threshold") {
+    for
+      threshold <- List(Some(0.75), Some(0.0), Some(-5.0), None)
+      passed <- List(""""passed":false,""", "", """"passed":"yes",""")
+    do
+      val r = toolCallRubricResult(s"""{$passed"score":0.75,"reasoning":"No lookup."}""", threshold)
+      assert(!r.passed, (threshold, passed))
+      assert(r.reasoning == "No lookup.", (threshold, passed))
+    assert(!toolCallRubricResult("""{"score":1.0,"reasoning":"r"}""", Some(0.0)).passed)
+  }
+
+  test("rubric missing a required tool call explains itself when the judge gives no reasoning") {
+    val r = toolCallRubricResult("""{"score":1.0}""")
+    assert(!r.passed)
+    assert(r.reasoning == "Required tool call not found.")
+  }
+
+  test("rubric missing a required tool call keeps the judge's score") {
+    assert(toolCallRubricResult("""{"passed":false,"reasoning":"r"}""").score == 0.0)
+    val scored = toolCallRubricResult("""{"passed":false,"score":1.0,"reasoning":"r"}""")
+    assert(!scored.passed)
+    assert(scored.score == 1.0)
+  }
+
+  test("rubric requiring a tool call passes by threshold when passed is true") {
+    assert(toolCallRubricResult("""{"passed":true,"score":0.75,"reasoning":"r"}""").passed)
+    assert(!toolCallRubricResult("""{"passed":true,"score":0.5,"reasoning":"r"}""").passed)
   }
 
   test("rubric without passThreshold fails with an explicit reason") {
@@ -328,30 +367,29 @@ class EvaluatorTest extends AnyFunSuite:
       assert(prompt.contains("Pick the one level that best matches the transcript."))
       assert(prompt.contains("Use the score written next to the chosen level in the criterion, exactly as written."))
       assert(prompt.contains("Only return a score that appears in the criterion's levels."))
-      assert(prompt.contains("Do not return a value between levels."))
+      assert(prompt.contains("Do not return a value between levels.\n  Do not rescale it to 0 to 1."))
       assert(
         prompt.contains(
           "If the levels have no scores, give the chosen level a score from 0 (lowest level) to 1 (highest level)."
         )
       )
       assert(prompt.contains("Do not add any other fields. Do not wrap in markdown."))
-      assert(!prompt.contains("If the required tool call is not found"))
+      assert(!prompt.contains("- passed:"))
     }
   }
 
-  test("rubric prompt requiring a tool call asks for score 0 when it is missing") {
-    val reply = """{"score":0.0,"reasoning":"no call"}"""
-    // The default prompt path never includes the tool-call section; only the template path does.
-    val (_, prompt) =
-      judgeOnce(rubricCriterion(requireToolCall = true), reply, Some("Judge the transcript."))
-    assert(prompt.contains("This criterion REQUIRES a tool/action invocation."))
-    assert(
-      prompt.contains(
-        "not just \"the action is missing\"\n" +
-          "If the required tool call is not found, return score 0, even if no level has that score.\n\n" +
-          "# Response Format"
+  test("rubric prompt requiring a tool call asks whether the tool call was found") {
+    val reply = """{"passed":false,"reasoning":"no call"}"""
+    List(None, Some("Judge the transcript.")).foreach { template =>
+      val (_, prompt) = judgeOnce(rubricCriterion(requireToolCall = true), reply, template)
+      assert(
+        prompt.contains(
+          "highest level).\n" +
+            "- passed: true if the required tool call is found, false if it is not.\n" +
+            "- reasoning: string (brief explanation)"
+        )
       )
-    )
+    }
   }
 
   test("scored prompt keeps the score-only response format") {

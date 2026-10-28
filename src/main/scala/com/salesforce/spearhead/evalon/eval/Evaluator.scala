@@ -53,10 +53,6 @@ Respond with valid JSON only, in this format:
    - If no matching action appears in trace, the criterion does NOT pass — but write the gap per the reasoning above (why it was not called), not just "the action is missing"
 """
 
-  // A rubric passes by its score, not by `passed`, so the judge must be told which score to give.
-  private val rubricMissingToolCallRule: String =
-    "If the required tool call is not found, return score 0, even if no level has that score.\n"
-
   def evaluate(scenario: Scenario, transcript: Transcript): Future[EvalResult] =
     val contextText =
       if scenario.context == Json.obj() then "None"
@@ -75,10 +71,12 @@ ${criterion.criterionType match
 Pick the one level that best matches the transcript."""
 }
 """
-      val rubricRule =
-        if criterion.criterionType == CriterionType.Rubric then rubricMissingToolCallRule else ""
       val toolSection =
-        if criterion.requireToolCall then s"$toolCallVerificationPrompt$rubricRule\n" else ""
+        if criterion.requireToolCall then s"$toolCallVerificationPrompt\n" else ""
+      val rubricPassedField =
+        if criterion.requireToolCall then
+          "- passed: true if the required tool call is found, false if it is not.\n"
+        else ""
       val outputFormatPrompt = criterion.criterionType match
         case CriterionType.Binary =>
           """# Response Format
@@ -89,13 +87,14 @@ Return valid JSON only, with these fields:
 
 Do not add any other fields. Do not wrap in markdown."""
         case CriterionType.Rubric =>
-          """# Response Format
+          s"""# Response Format
 
 Return valid JSON only, with these fields:
-- score: number from 0 to 1. Use the score written next to the chosen level in the criterion, exactly as written.
+- score: number. Use the score written next to the chosen level in the criterion, exactly as written.
   Only return a score that appears in the criterion's levels. Do not return a value between levels.
+  Do not rescale it to 0 to 1.
   If the levels have no scores, give the chosen level a score from 0 (lowest level) to 1 (highest level).
-- reasoning: string (brief explanation)
+${rubricPassedField}- reasoning: string (brief explanation)
 
 Do not add any other fields. Do not wrap in markdown."""
         case _ =>
@@ -162,31 +161,28 @@ $outputFormatPrompt"""
     val raw = parse(jsonStr).getOrElse(Json.obj())
     val c = raw.hcursor
     val reasoning = c.downField("reasoning").as[String].getOrElse("")
-    criterion.criterionType match
+    val (passed, score) = criterion.criterionType match
       case CriterionType.Binary =>
         val passed = c.downField("passed").as[Boolean].getOrElse(false)
-        CriterionResult(
-          criterion = criterion,
-          passed = passed,
-          reasoning = reasoning,
-          score = if passed then 1.0 else 0.0,
-        )
+        (passed, if passed then 1.0 else 0.0)
       case CriterionType.Rubric =>
-        parseRubricResult(criterion, c, reasoning, Option(response).getOrElse(""))
+        return parseRubricResult(criterion, c, reasoning, Option(response).getOrElse(""))
       case _ =>
         val score = c.downField("score").as[Double].getOrElse(0.0)
         val passed = criterion.passThreshold match
           case Some(threshold) => score >= threshold
           case None => c.downField("passed").as[Boolean].getOrElse(false)
-        CriterionResult(
-          criterion = criterion,
-          passed = passed,
-          reasoning = reasoning,
-          score = score,
-        )
+        (passed, score)
+    CriterionResult(
+      criterion = criterion,
+      passed = passed,
+      reasoning = reasoning,
+      score = score,
+    )
 
-  /** Rubric `passed` is always `score >= passThreshold`; the judge's own `passed` is ignored. An
-    * invalid score fails the criterion with an explicit reason rather than being clamped.
+  /** Rubric `passed` is `score >= passThreshold`. The judge's own `passed` is read only when a tool
+    * call is required: anything but `true` means the call was not found. An invalid score fails the
+    * criterion with an explicit reason.
     */
   private def parseRubricResult(
       criterion: EvalCriterion,
@@ -194,15 +190,24 @@ $outputFormatPrompt"""
       reasoning: String,
       response: String,
   ): CriterionResult =
-    // Written so NaN fails: circe decodes a JSON null as NaN.
-    val score = c.downField("score").as[Double].toOption.filter(s => s >= 0.0 && s <= 1.0)
+    // circe decodes a JSON null as NaN.
+    val score = c.downField("score").as[Double].toOption.filter(_.isFinite)
+    val toolCallMissing =
+      criterion.requireToolCall && !c.downField("passed").as[Boolean].toOption.contains(true)
     (score, criterion.passThreshold) match
+      case _ if toolCallMissing =>
+        CriterionResult(
+          criterion = criterion,
+          passed = false,
+          reasoning = if reasoning.trim.nonEmpty then reasoning else "Required tool call not found.",
+          score = score.getOrElse(0.0),
+        )
       case (None, _) =>
         val detail = if reasoning.trim.nonEmpty then reasoning else response.take(200)
         CriterionResult(
           criterion = criterion,
           passed = false,
-          reasoning = s"Invalid judge response: score missing or outside 0 to 1. $detail".trim,
+          reasoning = s"Invalid judge response: score missing or not a number. $detail".trim,
           score = 0.0,
         )
       case (Some(s), Some(threshold)) =>
