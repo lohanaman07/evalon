@@ -351,6 +351,19 @@ class EvaluatorTest extends AnyFunSuite:
     assert(!toolCallRubricResult("""{"passed":true,"score":0.5,"reasoning":"r"}""").passed)
   }
 
+  test("rubric with a blank description fails with an explicit reason") {
+    List("", "  ", null).foreach { description =>
+      val criterion = rubricCriterion().copy(description = description)
+      val (r, _) = judgeOnce(criterion, """{"score":1.0,"reasoning":"ok"}""")
+      assert(!r.passed, s"[$description]")
+      assert(r.score == 0.0, s"[$description]")
+      assert(
+        r.reasoning == "Rubric criterion has no description with its levels.",
+        s"[$description]",
+      )
+    }
+  }
+
   test("rubric without passThreshold fails with an explicit reason") {
     val r = rubricResult("""{"score":0.75,"reasoning":"ok"}""", None)
     assert(!r.passed)

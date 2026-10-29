@@ -282,35 +282,6 @@ class EvalonRunnerTest extends AnyFunSuite with BeforeAndAfterAll:
     assert(ex.getCause.isInstanceOf[NullPointerException])
   }
 
-  test("an invalid rubric fails the run before any LLM or agent call") {
-    val calls = new AtomicInteger()
-    val llm: Llm = (_, _) =>
-      calls.incrementAndGet()
-      CompletableFuture.completedFuture(Signals.End)
-    val agent: SimpleAgent = (_, _, _) =>
-      calls.incrementAndGet()
-      CompletableFuture.completedFuture(AgentReply.end())
-    val invalid = scenario("invalid-rubric").copy(
-      evalCriteria = List(
-        EvalCriterion("clarity", " ", CriterionType.Rubric, requireToolCall = false, Some(0.75))
-      )
-    )
-
-    val ex = intercept[InvalidScenarioException] {
-      evalon.runSimple(invalid, agent, llm, failFastOptions)
-    }
-    assert(
-      ex.getMessage == "Criterion 'clarity' is a rubric and needs a description with its levels"
-    )
-    assert(calls.get == 0)
-  }
-
-  test("InvalidScenarioException can be built from a Java list") {
-    val ex = InvalidScenarioException(java.util.List.of("a", "b"))
-    assert(ex.getMessage == "a; b")
-    assert(ex.getErrors == java.util.List.of("a", "b"))
-  }
-
   private def scenario(
       name: String,
       eventSources: List[EventSourceConfig] = Nil

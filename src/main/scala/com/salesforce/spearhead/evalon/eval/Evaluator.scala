@@ -195,6 +195,13 @@ $outputFormatPrompt"""
     val toolCallMissing =
       criterion.requireToolCall && !c.downField("passed").as[Boolean].toOption.contains(true)
     (score, criterion.passThreshold) match
+      case _ if Option(criterion.description).forall(_.trim.isEmpty) =>
+        CriterionResult(
+          criterion = criterion,
+          passed = false,
+          reasoning = "Rubric criterion has no description with its levels.",
+          score = 0.0,
+        )
       case _ if toolCallMissing =>
         CriterionResult(
           criterion = criterion,

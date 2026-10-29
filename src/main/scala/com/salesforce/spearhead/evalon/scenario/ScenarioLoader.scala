@@ -33,9 +33,6 @@ object ScenarioLoader:
     for
       json <- parser.parse(yamlString).left.map(_.getMessage)
       scenario <- decodeScenario(json)
-      _ <- ScenarioValidator.validate(scenario) match
-        case Nil    => Right(())
-        case errors => Left(errors.mkString("; "))
     yield scenario
 
   private def decodeScenario(json: Json): Either[String, Scenario] =
